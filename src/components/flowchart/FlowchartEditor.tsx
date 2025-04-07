@@ -1,398 +1,266 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { X, Plus, Trash2, Download, Save } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 
-interface Position {
+interface Node {
+  id: string;
+  type: 'solid' | 'dashed';
+  text: string;
   x: number;
   y: number;
+  width: number;
+  height: number;
+  color: string;
 }
 
 interface Connection {
   id: string;
   from: string;
   to: string;
-  fromPosition: Position;
-  toPosition: Position;
-}
-
-interface FlowchartBlock {
-  id: string;
-  type: 'start' | 'process' | 'decision' | 'end' | 'input' | 'output';
-  text: string;
-  position: Position;
-  width: number;
-  height: number;
+  type: 'solid' | 'dashed';
 }
 
 const FlowchartEditor: React.FC = () => {
-  const [blocks, setBlocks] = useState<FlowchartBlock[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
-  const [draggingBlock, setDraggingBlock] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  const [draggingNode, setDraggingNode] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
-  const [nextId, setNextId] = useState(1);
+  const [currentColor, setCurrentColor] = useState('#FFD6D6'); // Light pink default
+  const [currentType, setCurrentType] = useState<'solid' | 'dashed'>('solid');
+  const [connectionType, setConnectionType] = useState<'solid' | 'dashed'>('solid');
   
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Load saved flowchart data from localStorage on component mount
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  // Load saved flowchart from localStorage on component mount
   useEffect(() => {
-    const savedBlocks = localStorage.getItem('flowchartBlocks');
-    const savedConnections = localStorage.getItem('flowchartConnections');
-    const savedNextId = localStorage.getItem('flowchartNextId');
-    
-    if (savedBlocks) {
-      setBlocks(JSON.parse(savedBlocks));
-    }
-    
-    if (savedConnections) {
-      setConnections(JSON.parse(savedConnections));
-    }
-    
-    if (savedNextId) {
-      setNextId(JSON.parse(savedNextId));
+    const savedFlowchart = localStorage.getItem('productivityHubFlowchart');
+    if (savedFlowchart) {
+      try {
+        const { nodes: savedNodes, connections: savedConnections } = JSON.parse(savedFlowchart);
+        setNodes(savedNodes);
+        setConnections(savedConnections);
+      } catch (error) {
+        console.error('Failed to load saved flowchart:', error);
+      }
     }
   }, []);
-  
-  // Save flowchart data to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem('flowchartBlocks', JSON.stringify(blocks));
-    localStorage.setItem('flowchartConnections', JSON.stringify(connections));
-    localStorage.setItem('flowchartNextId', JSON.stringify(nextId));
-  }, [blocks, connections, nextId]);
-  
-  // Generate a unique ID for new blocks
-  const generateId = () => {
-    const id = `block-${nextId}`;
-    setNextId(nextId + 1);
-    return id;
-  };
-  
-  // Add a new block to the flowchart
-  const addBlock = (type: FlowchartBlock['type']) => {
-    const id = generateId();
-    const containerRect = containerRef.current?.getBoundingClientRect();
+
+  const addNode = (e: React.MouseEvent) => {
+    if (!canvasRef.current) return;
     
-    if (!containerRect) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left - 75; // Center the node on click
+    const y = e.clientY - rect.top - 40;
     
-    // Default dimensions based on block type
-    let width = 150;
-    let height = 60;
-    
-    if (type === 'decision') {
-      width = 120;
-      height = 120;
-    } else if (type === 'start' || type === 'end') {
-      width = 120;
-      height = 50;
-    }
-    
-    // Position the new block in the center of the container
-    const newBlock: FlowchartBlock = {
-      id,
-      type,
-      text: getDefaultText(type),
-      position: {
-        x: (containerRect.width / 2) - (width / 2),
-        y: (containerRect.height / 2) - (height / 2),
-      },
-      width,
-      height,
+    const newNode: Node = {
+      id: `node-${Date.now()}`,
+      type: currentType,
+      text: 'New Node',
+      x,
+      y,
+      width: 150,
+      height: 80,
+      color: currentColor,
     };
     
-    setBlocks([...blocks, newBlock]);
-    setSelectedBlock(id);
-    setEditingText(id);
-    setEditText(newBlock.text);
+    setNodes([...nodes, newNode]);
+    setSelectedNode(newNode.id);
+    setEditingText(newNode.id);
+    setEditText('New Node');
   };
-  
-  // Get default text based on block type
-  const getDefaultText = (type: FlowchartBlock['type']): string => {
-    switch (type) {
-      case 'start': return 'Start';
-      case 'end': return 'End';
-      case 'decision': return 'Decision?';
-      case 'process': return 'Process';
-      case 'input': return 'Input';
-      case 'output': return 'Output';
-      default: return 'New Block';
-    }
-  };
-  
-  // Handle mouse down on a block
-  const handleBlockMouseDown = (e: React.MouseEvent, blockId: string) => {
+
+  const startDragging = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
     
-    // Select the block
-    setSelectedBlock(blockId);
-    
-    // Start dragging
-    setDraggingBlock(blockId);
-    
-    const block = blocks.find(b => b.id === blockId);
-    if (!block) return;
-    
-    // Calculate the offset between mouse position and block position
-    const containerRect = containerRef.current?.getBoundingClientRect();
-    if (!containerRect) return;
-    
-    const offsetX = e.clientX - containerRect.left - block.position.x;
-    const offsetY = e.clientY - containerRect.top - block.position.y;
-    
-    setDragOffset({ x: offsetX, y: offsetY });
+    setDraggingNode(nodeId);
+    setDragOffset({
+      x: e.clientX - node.x,
+      y: e.clientY - node.y
+    });
   };
-  
-  // Handle mouse move for dragging blocks
+
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!draggingBlock) {
-      // Handle drawing connection line if connecting
-      if (connectingFrom) {
-        const containerRect = containerRef.current?.getBoundingClientRect();
-        if (!containerRect) return;
-        
-        // Update the temporary connection line
-        const fromBlock = blocks.find(b => b.id === connectingFrom);
-        if (!fromBlock) return;
-        
-        // Force re-render to update the temporary connection line
-        setConnections([...connections]);
-      }
-      return;
+    if (draggingNode && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left - dragOffset.x;
+      const y = e.clientY - rect.top - dragOffset.y;
+      
+      setNodes(nodes.map(node => 
+        node.id === draggingNode 
+          ? { ...node, x, y } 
+          : node
+      ));
     }
-    
-    const containerRect = containerRef.current?.getBoundingClientRect();
-    if (!containerRect) return;
-    
-    // Calculate new position
-    const newX = e.clientX - containerRect.left - dragOffset.x;
-    const newY = e.clientY - containerRect.top - dragOffset.y;
-    
-    // Update block position
-    setBlocks(blocks.map(block => {
-      if (block.id === draggingBlock) {
-        return {
-          ...block,
-          position: { x: newX, y: newY }
-        };
-      }
-      return block;
-    }));
-    
-    // Update connections
-    setConnections(connections.map(conn => {
-      if (conn.from === draggingBlock) {
-        return {
-          ...conn,
-          fromPosition: getConnectionPoint(draggingBlock, conn.to, 'from')
-        };
-      }
-      if (conn.to === draggingBlock) {
-        return {
-          ...conn,
-          toPosition: getConnectionPoint(conn.from, draggingBlock, 'to')
-        };
-      }
-      return conn;
-    }));
   };
-  
-  // Handle mouse up to stop dragging
+
   const handleMouseUp = () => {
-    setDraggingBlock(null);
-    
-    // If connecting, check if mouse is over a block
-    if (connectingFrom) {
-      setConnectingFrom(null);
-    }
+    setDraggingNode(null);
   };
-  
-  // Handle click on the container (background)
-  const handleContainerClick = () => {
-    setSelectedBlock(null);
-    setEditingText(null);
-  };
-  
-  // Start creating a connection from a block
-  const startConnection = (e: React.MouseEvent, blockId: string) => {
+
+  const startConnecting = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
-    setConnectingFrom(blockId);
+    setConnectingFrom(nodeId);
   };
-  
-  // Complete a connection to another block
-  const completeConnection = (e: React.MouseEvent, blockId: string) => {
+
+  const completeConnection = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
-    
-    if (!connectingFrom || connectingFrom === blockId) {
-      return;
-    }
-    
-    // Check if connection already exists
-    const connectionExists = connections.some(
-      conn => conn.from === connectingFrom && conn.to === blockId
-    );
-    
-    if (!connectionExists) {
-      const fromPosition = getConnectionPoint(connectingFrom, blockId, 'from');
-      const toPosition = getConnectionPoint(connectingFrom, blockId, 'to');
+    if (connectingFrom && connectingFrom !== nodeId) {
+      // Check if connection already exists
+      const connectionExists = connections.some(
+        conn => (conn.from === connectingFrom && conn.to === nodeId) || 
+                (conn.from === nodeId && conn.to === connectingFrom)
+      );
       
-      const newConnection: Connection = {
-        id: `conn-${connectingFrom}-${blockId}`,
-        from: connectingFrom,
-        to: blockId,
-        fromPosition,
-        toPosition
-      };
-      
-      setConnections([...connections, newConnection]);
+      if (!connectionExists) {
+        const newConnection: Connection = {
+          id: `conn-${Date.now()}`,
+          from: connectingFrom,
+          to: nodeId,
+          type: connectionType
+        };
+        setConnections([...connections, newConnection]);
+      }
     }
-    
     setConnectingFrom(null);
   };
-  
-  // Calculate connection points between blocks
-  const getConnectionPoint = (fromId: string, toId: string, pointType: 'from' | 'to'): Position => {
-    const fromBlock = blocks.find(b => b.id === fromId);
-    const toBlock = blocks.find(b => b.id === toId);
-    
-    if (!fromBlock || !toBlock) {
-      return { x: 0, y: 0 };
-    }
-    
-    // Calculate center points
-    const fromCenter = {
-      x: fromBlock.position.x + fromBlock.width / 2,
-      y: fromBlock.position.y + fromBlock.height / 2
-    };
-    
-    const toCenter = {
-      x: toBlock.position.x + toBlock.width / 2,
-      y: toBlock.position.y + toBlock.height / 2
-    };
-    
-    // Determine which side of the block to connect from/to
-    const dx = toCenter.x - fromCenter.x;
-    const dy = toCenter.y - fromCenter.y;
-    
-    const block = pointType === 'from' ? fromBlock : toBlock;
-    const center = pointType === 'from' ? fromCenter : toCenter;
-    
-    // Determine which side to connect to based on angle
-    const angle = Math.atan2(dy, dx);
-    const halfWidth = block.width / 2;
-    const halfHeight = block.height / 2;
-    
-    // Adjust for diamond shape if it's a decision block
-    if (block.type === 'decision') {
-      // For diamond shape, we need to calculate intersection with the diamond edges
-      const slope = Math.abs(dy / dx);
-      
-      if (slope > halfHeight / halfWidth) {
-        // Connect to top or bottom
-        const y = center.y + (dy > 0 ? halfHeight : -halfHeight);
-        const x = center.x + (halfHeight / slope) * (dx > 0 ? 1 : -1);
-        return { x, y };
-      } else {
-        // Connect to left or right
-        const x = center.x + (dx > 0 ? halfWidth : -halfWidth);
-        const y = center.y + (slope * halfWidth) * (dy > 0 ? 1 : -1);
-        return { x, y };
-      }
-    }
-    
-    // For rectangular blocks
-    if (Math.abs(angle) < Math.PI / 4 || Math.abs(angle) > (3 * Math.PI) / 4) {
-      // Connect to left or right
-      const x = center.x + (dx > 0 ? halfWidth : -halfWidth);
-      const y = center.y;
-      return { x, y };
+
+  const selectNode = (e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    if (connectingFrom) {
+      completeConnection(e, nodeId);
     } else {
-      // Connect to top or bottom
-      const x = center.x;
-      const y = center.y + (dy > 0 ? halfHeight : -halfHeight);
-      return { x, y };
+      setSelectedNode(nodeId);
+      setSelectedConnection(null);
     }
   };
-  
-  // Delete a block and its connections
-  const deleteBlock = (blockId: string) => {
-    setBlocks(blocks.filter(block => block.id !== blockId));
-    setConnections(connections.filter(conn => conn.from !== blockId && conn.to !== blockId));
-    setSelectedBlock(null);
-    setEditingText(null);
+
+  const selectConnection = (e: React.MouseEvent, connectionId: string) => {
+    e.stopPropagation();
+    setSelectedConnection(connectionId);
+    setSelectedNode(null);
   };
-  
-  // Delete a connection
+
+  const deleteNode = (nodeId: string) => {
+    setNodes(nodes.filter(node => node.id !== nodeId));
+    setConnections(connections.filter(conn => conn.from !== nodeId && conn.to !== nodeId));
+    setSelectedNode(null);
+  };
+
   const deleteConnection = (connectionId: string) => {
     setConnections(connections.filter(conn => conn.id !== connectionId));
+    setSelectedConnection(null);
   };
-  
-  // Start editing block text
-  const startEditingText = (e: React.MouseEvent, blockId: string) => {
-    e.stopPropagation();
-    const block = blocks.find(b => b.id === blockId);
-    if (!block) return;
-    
-    setEditingText(blockId);
-    setEditText(block.text);
-  };
-  
-  // Save edited text
-  const saveEditedText = () => {
-    if (!editingText) return;
-    
-    setBlocks(blocks.map(block => {
-      if (block.id === editingText) {
-        return {
-          ...block,
-          text: editText
-        };
-      }
-      return block;
-    }));
-    
-    setEditingText(null);
-  };
-  
-  // Handle key press in text editor
-  const handleTextKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveEditedText();
+
+  const startEditing = (nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) {
+      setEditingText(nodeId);
+      setEditText(node.text);
     }
   };
-  
-  // Clear the flowchart
-  const clearFlowchart = () => {
-    if (window.confirm('Are you sure you want to clear the flowchart? This action cannot be undone.')) {
-      setBlocks([]);
-      setConnections([]);
-      setSelectedBlock(null);
+
+  const saveText = () => {
+    if (editingText) {
+      setNodes(nodes.map(node => 
+        node.id === editingText 
+          ? { ...node, text: editText } 
+          : node
+      ));
       setEditingText(null);
     }
   };
-  
-  // Export flowchart as JSON
-  const exportFlowchart = () => {
-    const data = {
-      blocks,
-      connections
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'flowchart.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+
+  const changeNodeColor = (nodeId: string, color: string) => {
+    setNodes(nodes.map(node => 
+      node.id === nodeId 
+        ? { ...node, color } 
+        : node
+    ));
   };
-  
-  // Import flowchart from JSON
+
+  const changeNodeType = (nodeId: string, type: 'solid' | 'dashed') => {
+    setNodes(nodes.map(node => 
+      node.id === nodeId 
+        ? { ...node, type } 
+        : node
+    ));
+  };
+
+  const changeConnectionType = (connectionId: string, type: 'solid' | 'dashed') => {
+    setConnections(connections.map(conn => 
+      conn.id === connectionId 
+        ? { ...conn, type } 
+        : conn
+    ));
+  };
+
+  const clearCanvas = () => {
+    if (window.confirm('Are you sure you want to clear the canvas? This action cannot be undone.')) {
+      setNodes([]);
+      setConnections([]);
+      setSelectedNode(null);
+      setSelectedConnection(null);
+    }
+  };
+
+  const saveFlowchart = () => {
+    try {
+      localStorage.setItem('productivityHubFlowchart', JSON.stringify({ nodes, connections }));
+      toast({
+        title: "Flowchart saved",
+        description: "Your flowchart has been saved successfully.",
+      });
+    } catch (error) {
+      console.error('Failed to save flowchart:', error);
+      toast({
+        title: "Save failed",
+        description: "There was an error saving your flowchart.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const exportFlowchart = () => {
+    try {
+      const data = JSON.stringify({ nodes, connections }, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'flowchart.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Flowchart exported",
+        description: "Your flowchart has been exported as JSON.",
+      });
+    } catch (error) {
+      console.error('Failed to export flowchart:', error);
+      toast({
+        title: "Export failed",
+        description: "There was an error exporting your flowchart.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const importFlowchart = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -400,454 +268,392 @@ const FlowchartEditor: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const data = JSON.parse(event.target?.result as string);
-        
-        if (data.blocks && Array.isArray(data.blocks) && 
-            data.connections && Array.isArray(data.connections)) {
-          setBlocks(data.blocks);
-          setConnections(data.connections);
-          
-          // Update nextId to be greater than any existing id
-          const maxId = data.blocks.reduce((max: number, block: FlowchartBlock) => {
-            const idNum = parseInt(block.id.replace('block-', ''));
-            return Math.max(max, idNum);
-          }, 0);
-          
-          setNextId(maxId + 1);
-        } else {
-          alert('Invalid flowchart data format');
-        }
+        const content = event.target?.result as string;
+        const { nodes: importedNodes, connections: importedConnections } = JSON.parse(content);
+        setNodes(importedNodes);
+        setConnections(importedConnections);
+        toast({
+          title: "Flowchart imported",
+          description: "Your flowchart has been imported successfully.",
+        });
       } catch (error) {
-        alert('Error importing flowchart: ' + error);
+        console.error('Failed to import flowchart:', error);
+        toast({
+          title: "Import failed",
+          description: "There was an error importing your flowchart.",
+          variant: "destructive",
+        });
       }
     };
-    
     reader.readAsText(file);
-    
-    // Reset the input value to allow importing the same file again
-    e.target.value = '';
   };
-  
-  // Render a block based on its type
-  const renderBlock = (block: FlowchartBlock) => {
-    const isSelected = selectedBlock === block.id;
-    const isEditing = editingText === block.id;
-    
-    let blockShape;
-    
-    switch (block.type) {
-      case 'start':
-      case 'end':
-        // Rounded rectangle
-        blockShape = (
-          <div 
-            className={`absolute rounded-full flex items-center justify-center p-2 ${
-              block.type === 'start' ? 'bg-green-100 border-green-500' : 'bg-red-100 border-red-500'
-            } ${isSelected ? 'border-2' : 'border'}`}
-            style={{
-              left: `${block.position.x}px`,
-              top: `${block.position.y}px`,
-              width: `${block.width}px`,
-              height: `${block.height}px`,
-              cursor: 'move',
-              zIndex: isSelected ? 10 : 1
-            }}
-            onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
-            onDoubleClick={(e) => startEditingText(e, block.id)}
-          >
-            {isEditing ? (
-              <input
-                type="text"
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onKeyPress={handleTextKeyPress}
-                onBlur={saveEditedText}
-                className="w-full text-center bg-transparent outline-none"
-                autoFocus
-              />
-            ) : (
-              <div className="text-center">{block.text}</div>
-            )}
-          </div>
-        );
-        break;
-        
-      case 'decision':
-        // Diamond shape
-        blockShape = (
-          <div 
-            className={`absolute flex items-center justify-center ${
-              isSelected ? 'border-2 border-blue-500' : 'border border-gray-400'
-            }`}
-            style={{
-              left: `${block.position.x}px`,
-              top: `${block.position.y}px`,
-              width: `${block.width}px`,
-              height: `${block.height}px`,
-              transform: 'rotate(45deg)',
-              backgroundColor: 'rgb(254, 240, 138)',
-              cursor: 'move',
-              zIndex: isSelected ? 10 : 1
-            }}
-            onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
-          >
-            <div 
-              style={{ transform: 'rotate(-45deg)', width: '100%', height: '100%' }}
-              className="flex items-center justify-center"
-              onDoubleClick={(e) => startEditingText(e, block.id)}
-            >
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  onKeyPress={handleTextKeyPress}
-                  onBlur={saveEditedText}
-                  className="w-3/4 text-center bg-transparent outline-none"
-                  autoFocus
-                />
-              ) : (
-                <div className="text-center p-2">{block.text}</div>
-              )}
-            </div>
-          </div>
-        );
-        break;
-        
-      case 'input':
-      case 'output':
-        // Parallelogram
-        const skewValue = block.type === 'input' ? 'skew(20deg)' : 'skew(-20deg)';
-        blockShape = (
-          <div 
-            className={`absolute flex items-center justify-center ${
-              isSelected ? 'border-2 border-blue-500' : 'border border-gray-400'
-            }`}
-            style={{
-              left: `${block.position.x}px`,
-              top: `${block.position.y}px`,
-              width: `${block.width}px`,
-              height: `${block.height}px`,
-              transform: skewValue,
-              backgroundColor: block.type === 'input' ? 'rgb(219, 234, 254)' : 'rgb(254, 226, 226)',
-              cursor: 'move',
-              zIndex: isSelected ? 10 : 1
-            }}
-            onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
-          >
-            <div 
-              style={{ transform: block.type === 'input' ? 'skew(-20deg)' : 'skew(20deg)' }}
-              className="flex items-center justify-center w-full h-full"
-              onDoubleClick={(e) => startEditingText(e, block.id)}
-            >
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  onKeyPress={handleTextKeyPress}
-                  onBlur={saveEditedText}
-                  className="w-3/4 text-center bg-transparent outline-none"
-                  autoFocus
-                />
-              ) : (
-                <div className="text-center p-2">{block.text}</div>
-              )}
-            </div>
-          </div>
-        );
-        break;
-        
-      case 'process':
-      default:
-        // Rectangle
-        blockShape = (
-          <div 
-            className={`absolute flex items-center justify-center p-2 bg-white ${
-              isSelected ? 'border-2 border-blue-500' : 'border border-gray-400'
-            }`}
-            style={{
-              left: `${block.position.x}px`,
-              top: `${block.position.y}px`,
-              width: `${block.width}px`,
-              height: `${block.height}px`,
-              cursor: 'move',
-              zIndex: isSelected ? 10 : 1
-            }}
-            onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
-            onDoubleClick={(e) => startEditingText(e, block.id)}
-          >
-            {isEditing ? (
-              <input
-                type="text"
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onKeyPress={handleTextKeyPress}
-                onBlur={saveEditedText}
-                className="w-full text-center bg-transparent outline-none"
-                autoFocus
-              />
-            ) : (
-              <div className="text-center">{block.text}</div>
-            )}
-          </div>
-        );
+
+  const handleCanvasClick = (e: React.MouseEvent) => {
+    if (e.target === canvasRef.current) {
+      setSelectedNode(null);
+      setSelectedConnection(null);
+      setEditingText(null);
+      
+      if (e.ctrlKey || e.metaKey) {
+        addNode(e);
+      }
     }
-    
-    // Connection points
-    const connectionPoints = (
-      <>
-        {/* Top connection point */}
-        <div 
-          className="absolute w-6 h-6 bg-blue-500 rounded-full opacity-0 hover:opacity-50 cursor-pointer"
-          style={{
-            left: `${block.position.x + block.width / 2 - 3}px`,
-            top: `${block.position.y - 3}px`,
-            zIndex: 20
-          }}
-          onMouseDown={(e) => startConnection(e, block.id)}
-          onMouseUp={(e) => completeConnection(e, block.id)}
-        />
-        
-        {/* Right connection point */}
-        <div 
-          className="absolute w-6 h-6 bg-blue-500 rounded-full opacity-0 hover:opacity-50 cursor-pointer"
-          style={{
-            left: `${block.position.x + block.width - 3}px`,
-            top: `${block.position.y + block.height / 2 - 3}px`,
-            zIndex: 20
-          }}
-          onMouseDown={(e) => startConnection(e, block.id)}
-          onMouseUp={(e) => completeConnection(e, block.id)}
-        />
-        
-        {/* Bottom connection point */}
-        <div 
-          className="absolute w-6 h-6 bg-blue-500 rounded-full opacity-0 hover:opacity-50 cursor-pointer"
-          style={{
-            left: `${block.position.x + block.width / 2 - 3}px`,
-            top: `${block.position.y + block.height - 3}px`,
-            zIndex: 20
-          }}
-          onMouseDown={(e) => startConnection(e, block.id)}
-          onMouseUp={(e) => completeConnection(e, block.id)}
-        />
-        
-        {/* Left connection point */}
-        <div 
-          className="absolute w-6 h-6 bg-blue-500 rounded-full opacity-0 hover:opacity-50 cursor-pointer"
-          style={{
-            left: `${block.position.x - 3}px`,
-            top: `${block.position.y + block.height / 2 - 3}px`,
-            zIndex: 20
-          }}
-          onMouseDown={(e) => startConnection(e, block.id)}
-          onMouseUp={(e) => completeConnection(e, block.id)}
-        />
-      </>
-    );
-    
-    return (
-      <React.Fragment key={block.id}>
-        {blockShape}
-        {isSelected && connectionPoints}
-      </React.Fragment>
-    );
   };
-  
-  // Render connections between blocks
+
   const renderConnections = () => {
-    return connections.map(connection => {
-      const { fromPosition, toPosition } = connection;
+    return connections.map(conn => {
+      const fromNode = nodes.find(n => n.id === conn.from);
+      const toNode = nodes.find(n => n.id === conn.to);
       
-      // Calculate the midpoint for the arrow
-      const midX = (fromPosition.x + toPosition.x) / 2;
-      const midY = (fromPosition.y + toPosition.y) / 2;
+      if (!fromNode || !toNode) return null;
       
-      // Calculate the angle for the arrowhead
-      const angle = Math.atan2(toPosition.y - fromPosition.y, toPosition.x - fromPosition.x);
+      const fromX = fromNode.x + fromNode.width / 2;
+      const fromY = fromNode.y + fromNode.height / 2;
+      const toX = toNode.x + toNode.width / 2;
+      const toY = toNode.y + toNode.height / 2;
       
-      // Arrowhead points
-      const arrowSize = 10;
-      const arrowPoint1 = {
-        x: midX - arrowSize * Math.cos(angle - Math.PI / 6),
-        y: midY - arrowSize * Math.sin(angle - Math.PI / 6)
-      };
-      const arrowPoint2 = {
-        x: midX - arrowSize * Math.cos(angle + Math.PI / 6),
-        y: midY - arrowSize * Math.sin(angle + Math.PI / 6)
-      };
+      // Calculate arrow points
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+      const angle = Math.atan2(dy, dx);
+      
+      // Adjust start and end points to be on the edge of nodes
+      const fromNodeAngle = Math.atan2(toY - fromY, toX - fromX);
+      const toNodeAngle = Math.atan2(fromY - toY, fromX - toX);
+      
+      const fromRadius = Math.min(fromNode.width, fromNode.height) / 2;
+      const toRadius = Math.min(toNode.width, toNode.height) / 2;
+      
+      const adjustedFromX = fromX + Math.cos(fromNodeAngle) * fromRadius;
+      const adjustedFromY = fromY + Math.sin(fromNodeAngle) * fromRadius;
+      const adjustedToX = toX + Math.cos(toNodeAngle) * toRadius;
+      const adjustedToY = toY + Math.sin(toNodeAngle) * toRadius;
+      
+      // Arrow head
+      const arrowLength = 10;
+      const arrowWidth = 5;
+      const arrowX1 = adjustedToX - arrowLength * Math.cos(angle - Math.PI / 6);
+      const arrowY1 = adjustedToY - arrowLength * Math.sin(angle - Math.PI / 6);
+      const arrowX2 = adjustedToX - arrowLength * Math.cos(angle + Math.PI / 6);
+      const arrowY2 = adjustedToY - arrowLength * Math.sin(angle + Math.PI / 6);
+      
+      const isSelected = selectedConnection === conn.id;
+      const strokeStyle = conn.type === 'dashed' ? '5,5' : '';
       
       return (
-        <g key={connection.id}>
-          {/* Connection line */}
+        <g key={conn.id} onClick={(e) => selectConnection(e, conn.id)}>
           <line
-            x1={fromPosition.x}
-            y1={fromPosition.y}
-            x2={toPosition.x}
-            y2={toPosition.y}
-            stroke="black"
-            strokeWidth="2"
-            markerMid="url(#arrowhead)"
-            onClick={() => deleteConnection(connection.id)}
+            x1={adjustedFromX}
+            y1={adjustedFromY}
+            x2={adjustedToX}
+            y2={adjustedToY}
+            stroke={isSelected ? '#ff6b6b' : '#0066cc'}
+            strokeWidth={isSelected ? 3 : 2}
+            strokeDasharray={strokeStyle}
             style={{ cursor: 'pointer' }}
           />
-          
-          {/* Arrowhead */}
           <polygon
-            points={`${midX},${midY} ${arrowPoint1.x},${arrowPoint1.y} ${arrowPoint2.x},${arrowPoint2.y}`}
-            fill="black"
-            onClick={() => deleteConnection(connection.id)}
-            style={{ cursor: 'pointer' }}
+            points={`${adjustedToX},${adjustedToY} ${arrowX1},${arrowY1} ${arrowX2},${arrowY2}`}
+            fill={isSelected ? '#ff6b6b' : '#0066cc'}
           />
+          {isSelected && (
+            <foreignObject
+              x={(adjustedFromX + adjustedToX) / 2 - 15}
+              y={(adjustedFromY + adjustedToY) / 2 - 15}
+              width="30"
+              height="30"
+            >
+              <div
+                className="flex items-center justify-center bg-red-500 text-white rounded-full w-6 h-6 cursor-pointer"
+                onClick={() => deleteConnection(conn.id)}
+              >
+                <X size={14} />
+              </div>
+            </foreignObject>
+          )}
         </g>
       );
     });
   };
-  
-  // Render temporary connection line when creating a connection
-  const renderTemporaryConnection = () => {
-    if (!connectingFrom) return null;
-    
-    const fromBlock = blocks.find(b => b.id === connectingFrom);
-    if (!fromBlock) return null;
-    
-    const fromCenter = {
-      x: fromBlock.position.x + fromBlock.width / 2,
-      y: fromBlock.position.y + fromBlock.height / 2
-    };
-    
-    const containerRect = containerRef.current?.getBoundingClientRect();
-    if (!containerRect) return null;
-    
-    // Get mouse position relative to container
-    const mouseX = 0; // This will be updated in handleMouseMove
-    const mouseY = 0; // This will be updated in handleMouseMove
-    
-    return (
-      <line
-        x1={fromCenter.x}
-        y1={fromCenter.y}
-        x2={mouseX}
-        y2={mouseY}
-        stroke="gray"
-        strokeWidth="2"
-        strokeDasharray="5,5"
-      />
-    );
+
+  const renderNodes = () => {
+    return nodes.map(node => {
+      const isSelected = selectedNode === node.id;
+      const isEditing = editingText === node.id;
+      
+      const borderStyle = node.type === 'dashed' ? '5,5' : '';
+      const nodeStyle: React.CSSProperties = {
+        position: 'absolute',
+        left: `${node.x}px`,
+        top: `${node.y}px`,
+        width: `${node.width}px`,
+        height: `${node.height}px`,
+        backgroundColor: node.color,
+        border: `2px ${node.type === 'dashed' ? 'dashed' : 'solid'} ${isSelected ? '#ff6b6b' : '#333'}`,
+        borderRadius: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'move',
+        padding: '8px',
+        boxShadow: isSelected ? '0 0 0 2px rgba(255, 107, 107, 0.5)' : 'none',
+        zIndex: isSelected ? 10 : 1
+      };
+      
+      return (
+        <div
+          key={node.id}
+          style={nodeStyle}
+          onClick={(e) => selectNode(e, node.id)}
+          onMouseDown={(e) => startDragging(e, node.id)}
+          onDoubleClick={() => startEditing(node.id)}
+        >
+          {isEditing ? (
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onBlur={saveText}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  saveText();
+                }
+              }}
+              autoFocus
+              className="w-full h-full bg-transparent border-none resize-none text-center focus:outline-none"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <div className="text-center w-full break-words">{node.text}</div>
+          )}
+          
+          {isSelected && !isEditing && (
+            <>
+              <div
+                className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center cursor-pointer"
+                onClick={() => deleteNode(node.id)}
+              >
+                <X size={14} />
+              </div>
+              <div
+                className="absolute top-1/2 -right-3 transform -translate-y-1/2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center cursor-pointer"
+                onClick={(e) => startConnecting(e, node.id)}
+              >
+                <Plus size={14} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    });
   };
-  
+
   return (
-    <div className="flowchart-editor-container p-4 bg-gray-50 dark:bg-gray-900 rounded-lg shadow-lg">
-      <div className="toolbar flex flex-wrap gap-2 mb-4">
-        <div className="block-types flex flex-wrap gap-2">
-          <button 
-            onClick={() => addBlock('start')}
-            className="px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+    <div className="flex flex-col h-full">
+      <div className="flex flex-wrap gap-2 p-2 border-b">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm font-medium">Node Style:</span>
+          <Button
+            variant={currentType === 'solid' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCurrentType('solid')}
+            className="h-8"
           >
-            Start
-          </button>
-          <button 
-            onClick={() => addBlock('process')}
-            className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            Solid
+          </Button>
+          <Button
+            variant={currentType === 'dashed' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCurrentType('dashed')}
+            className="h-8"
           >
-            Process
-          </button>
-          <button 
-            onClick={() => addBlock('decision')}
-            className="px-3 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
-          >
-            Decision
-          </button>
-          <button 
-            onClick={() => addBlock('input')}
-            className="px-3 py-2 bg-blue-300 text-white rounded hover:bg-blue-400"
-          >
-            Input
-          </button>
-          <button 
-            onClick={() => addBlock('output')}
-            className="px-3 py-2 bg-red-300 text-white rounded hover:bg-red-400"
-          >
-            Output
-          </button>
-          <button 
-            onClick={() => addBlock('end')}
-            className="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-          >
-            End
-          </button>
+            Dashed
+          </Button>
         </div>
         
-        <div className="actions flex flex-wrap gap-2 ml-auto">
-          {selectedBlock && (
-            <button 
-              onClick={() => deleteBlock(selectedBlock)}
-              className="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-            >
-              Delete Block
-            </button>
-          )}
-          <button 
-            onClick={clearFlowchart}
-            className="px-3 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+        <div className="flex items-center space-x-2">
+          <span className="text-sm font-medium">Connection:</span>
+          <Button
+            variant={connectionType === 'solid' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setConnectionType('solid')}
+            className="h-8"
           >
-            Clear All
-          </button>
-          <button 
-            onClick={exportFlowchart}
-            className="px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+            Solid
+          </Button>
+          <Button
+            variant={connectionType === 'dashed' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setConnectionType('dashed')}
+            className="h-8"
           >
-            Export
-          </button>
-          <label className="px-3 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 cursor-pointer">
-            Import
-            <input 
-              type="file" 
-              accept=".json" 
-              onChange={importFlowchart} 
-              className="hidden" 
+            Dashed
+          </Button>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <span className="text-sm font-medium">Color:</span>
+          <div className="flex space-x-1">
+            {['#FFD6D6', '#D6FFD6', '#D6D6FF', '#FFFFD6', '#FFD6FF', '#D6FFFF', '#FFFFFF'].map(color => (
+              <div
+                key={color}
+                className={`w-6 h-6 rounded-full cursor-pointer ${currentColor === color ? 'ring-2 ring-blue-500' : ''}`}
+                style={{ backgroundColor: color }}
+                onClick={() => setCurrentColor(color)}
+              />
+            ))}
+          </div>
+        </div>
+        
+        <div className="flex-grow"></div>
+        
+        <div className="flex space-x-2">
+          <Button size="sm" variant="outline" onClick={saveFlowchart} className="h-8">
+            <Save size={16} className="mr-1" /> Save
+          </Button>
+          <Button size="sm" variant="outline" onClick={exportFlowchart} className="h-8">
+            <Download size={16} className="mr-1" /> Export
+          </Button>
+          <label className="cursor-pointer">
+            <Button size="sm" variant="outline" className="h-8" asChild>
+              <span>Import</span>
+            </Button>
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={importFlowchart}
             />
           </label>
+          <Button size="sm" variant="destructive" onClick={clearCanvas} className="h-8">
+            <Trash2 size={16} className="mr-1" /> Clear
+          </Button>
         </div>
       </div>
       
-      <div 
-        ref={containerRef}
-        className="flowchart-container relative border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg"
-        style={{ height: '600px', overflow: 'hidden' }}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onClick={handleContainerClick}
-      >
-        {/* SVG layer for connections */}
-        <svg 
-          width="100%" 
-          height="100%" 
-          style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
-        >
-          <defs>
-            <marker 
-              id="arrowhead" 
-              markerWidth="10" 
-              markerHeight="7" 
-              refX="0" 
-              refY="3.5" 
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" />
-            </marker>
-          </defs>
-          {renderConnections()}
-          {renderTemporaryConnection()}
-        </svg>
-        
-        {/* Blocks layer */}
-        {blocks.map(renderBlock)}
-      </div>
+      {selectedNode && (
+        <Card className="m-2 p-2">
+          <div className="text-sm">
+            <div className="font-medium">Node Properties</div>
+            <div className="flex flex-wrap gap-2 mt-1">
+              <div className="flex items-center space-x-2">
+                <span>Style:</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeNodeType(selectedNode, 'solid')}
+                  className={`h-7 ${nodes.find(n => n.id === selectedNode)?.type === 'solid' ? 'bg-blue-100' : ''}`}
+                >
+                  Solid
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeNodeType(selectedNode, 'dashed')}
+                  className={`h-7 ${nodes.find(n => n.id === selectedNode)?.type === 'dashed' ? 'bg-blue-100' : ''}`}
+                >
+                  Dashed
+                </Button>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span>Color:</span>
+                <div className="flex space-x-1">
+                  {['#FFD6D6', '#D6FFD6', '#D6D6FF', '#FFFFD6', '#FFD6FF', '#D6FFFF', '#FFFFFF'].map(color => (
+                    <div
+                      key={color}
+                      className={`w-5 h-5 rounded-full cursor-pointer ${nodes.find(n => n.id === selectedNode)?.color === color ? 'ring-2 ring-blue-500' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => changeNodeColor(selectedNode, color)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => startEditing(selectedNode)}
+                className="h-7"
+              >
+                Edit Text
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
       
-      <div className="instructions mt-4 text-sm text-gray-600 dark:text-gray-400">
-        <p>Double-click on a block to edit its text. Drag from connection points to create connections between blocks.</p>
+      {selectedConnection && (
+        <Card className="m-2 p-2">
+          <div className="text-sm">
+            <div className="font-medium">Connection Properties</div>
+            <div className="flex flex-wrap gap-2 mt-1">
+              <div className="flex items-center space-x-2">
+                <span>Style:</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeConnectionType(selectedConnection, 'solid')}
+                  className={`h-7 ${connections.find(c => c.id === selectedConnection)?.type === 'solid' ? 'bg-blue-100' : ''}`}
+                >
+                  Solid
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeConnectionType(selectedConnection, 'dashed')}
+                  className={`h-7 ${connections.find(c => c.id === selectedConnection)?.type === 'dashed' ? 'bg-blue-100' : ''}`}
+                >
+                  Dashed
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => deleteConnection(selectedConnection)}
+                className="h-7"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+      
+      <div className="flex-grow relative overflow-hidden border rounded-md m-2 bg-gray-50">
+        <div
+          ref={canvasRef}
+          className="absolute inset-0 overflow-auto"
+          onClick={handleCanvasClick}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          <div className="relative w-full h-full min-h-[600px]">
+            {renderNodes()}
+            <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
+              {renderConnections()}
+              {connectingFrom && canvasRef.current && (
+                <line
+                  x1={(() => {
+                    const fromNode = nodes.find(n => n.id === connectingFrom);
+                    return fromNode ? fromNode.x + fromNode.width / 2 : 0;
+                  })()}
+                  y1={(() => {
+                    const fromNode = nodes.find(n => n.id === connectingFrom);
+                    return fromNode ? fromNode.y + fromNode.height / 2 : 0;
+                  })()}
+                  x2={canvasRef.current.scrollLeft + window.event?.clientX - canvasRef.current.getBoundingClientRect().left}
+                  y2={canvasRef.current.scrollTop + window.event?.clientY - canvasRef.current.getBoundingClientRect().top}
+                  stroke="#0066cc"
+                  strokeWidth={2}
+                  strokeDasharray={connectionType === 'dashed' ? '5,5' : ''}
+                />
+              )}
+            </svg>
+          </div>
+        </div>
+        <div className="absolute bottom-2 left-2 text-xs text-gray-500">
+          Tip: Ctrl+Click to add a node. Double-click a node to edit text.
+        </div>
       </div>
     </div>
   );
