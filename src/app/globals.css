@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: rgb(59, 130, 246);
+  --color-secondary: rgb(99, 102, 241);
+  --color-background: rgb(255, 255, 255);
+  --color-text: rgb(17, 24, 39);
+  --color-accent: rgb(79, 70, 229);
+}
+
+.dark {
+  --color-primary: rgb(96, 165, 250);
+  --color-secondary: rgb(129, 140, 248);
+  --color-background: rgb(31, 41, 55);
+  --color-text: rgb(243, 244, 246);
+  --color-accent: rgb(129, 140, 248);
+}
+
+body {
+  color: var(--color-text);
+  background: var(--color-background);
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .pomodoro-container {
+    padding: 1rem;
+  }
+  
+  .timer-modes {
+    flex-wrap: wrap;
+  }
+  
+  .timer-display {
+    font-size: 4rem;
+  }
+  
+  .timer-settings .grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .flowchart-editor-container .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .flowchart-editor-container .actions {
+    margin-left: 0;
+    margin-top: 0.5rem;
+  }
+  
+  .timetable-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .timetable-header .date-navigation {
+    margin-top: 0.5rem;
+  }
+}
+
+/* Elegant, soft design elements */
+.shadow-soft {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.02);
+}
+
+.rounded-soft {
+  border-radius: 1rem;
+}
+
+.transition-soft {
+  transition: all 0.3s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* Custom scrollbar for a more elegant look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* Animations for tab transitions */
+.tab-content {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.tab-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.tab-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tab-exit {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tab-exit-active {
+  opacity: 0;
+  transform: translateY(-10px);
+}
